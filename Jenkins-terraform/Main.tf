@@ -59,6 +59,7 @@ resource "aws_security_group" "Jenkins-sg" {
 }
 
 resource "aws_instance" "web" {
+  ## ubuntu 22.04
   ami                    = "ami-0326f9264af7e51e2"
   instance_type          = "t2.large"
   key_name               = "projet-2"
