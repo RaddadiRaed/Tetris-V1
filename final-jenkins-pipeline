@@ -1,0 +1,86 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        GIT_REPO_NAME = "Tetris-manifest"
+        GIT_USER_NAME = "RaddadiRaed"
+    }
+    stages {
+        stage('CO') {
+            steps {
+                git branch: 'main', url: 'https://github.com/RaddadiRaed/Tetris-V1.git'
+            }
+        }
+        stage('Sonar Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=TETRISVersion1.0 \
+                    -Dsonar.projectKey=TETRISVersion1.0'''
+                }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+        stage('NPM Install') {
+            steps {
+                sh 'npm install'
+            }
+        }
+        stage('Trivy FS') {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('Docker Build and Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh'''
+                        docker build -t tetrisv1 .
+                        docker tag tetrisv1 raedraddadi98/tetrisv1:latest
+                        docker push raedraddadi98/tetrisv1:latest
+                        '''
+                    }
+                }
+            }
+        }
+        stage('Trivy IMAGE') {
+            steps {
+                sh 'trivy image raedraddadi98/tetrisv1:latest > trivyimage.txt'
+            }
+        }
+        stage('COManifest') {
+            steps {
+                git branch: 'main', url: 'https://github.com/RaddadiRaed/Tetris-manifest.git'
+            }
+        }
+        stage('Update Deployment File') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+                        NEW_IMAGE_NAME = "raedraddadi98/tetrisv1:latest"
+                        sh "sed -i 's|image: .*|image: $NEW_IMAGE_NAME|' deployment.yml"
+                        sh 'git add deployment.yml'
+                        sh "git commit -m 'Update deployment image to $NEW_IMAGE_NAME'"
+                        sh "git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main"
+                    }    
+                }
+            }
+        }
+    }
+}
